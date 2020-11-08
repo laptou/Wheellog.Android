@@ -287,7 +287,7 @@ public class MainActivity extends AppCompatActivity {
                     WheelLog.AppConfig.changeSettingsSpecific(mDeviceAddress);
                     WheelLog.AppConfig.setLastMac(mDeviceAddress, true);
                     if (WheelLog.AppConfig.getAutoUploadEc() && WheelLog.AppConfig.getEcToken() != null) {
-                        ElectroClub.getInstance().getAndSelectGarageByMacOrPrimary(WheelLog.AppConfig.getLastMac(), s -> null);
+                        ElectroClub.getInstance().getAndSelectGarageByMac(WheelLog.AppConfig.getLastMac());
                     }
                 }
                 hideSnackBar();
@@ -954,19 +954,13 @@ public class MainActivity extends AppCompatActivity {
         WheelData.initiate();
         WheelLog.AppConfig.initGeneralSettingsSpecific();
 
-        ElectroClub.getInstance().setErrorListener((method, error) -> {
-            String message = "[ec] " + method + " error: " + error;
-            Timber.i(message);
-            MainActivity.this.runOnUiThread(() -> showSnackBar(message, 4000));
-            return null;
-        });
-        ElectroClub.getInstance().setSuccessListener((method, success) -> {
-            if (method.equals(ElectroClub.GET_GARAGE_METHOD)) {
+        ElectroClub.getInstance().setMethodCallback((method, type, message) -> {
+            if (type == ElectroClub.SUCCESS && method.equals(ElectroClub.GET_GARAGE_METHOD)) {
                 return null;
             }
-            String message = "[ec] " + method + " ok: " + success;
-            Timber.i(message);
-            MainActivity.this.runOnUiThread(() -> showSnackBar(message, 4000));
+            String mess = String.format("[ec] %s %s %s", method, type == 0 ? "ok" : "error", message);
+            Timber.i(mess);
+            MainActivity.this.runOnUiThread(() -> showSnackBar(mess, 4000));
             return null;
         });
 
@@ -1295,7 +1289,7 @@ public class MainActivity extends AppCompatActivity {
                     if (ElectroClub.getInstance().getUserToken() == null)
                         startActivityForResult(new Intent(MainActivity.this, LoginActivity.class), RESULT_AUTH_REQUEST);
                     else
-                        ElectroClub.getInstance().getAndSelectGarageByMacOrPrimary(mDeviceAddress, s -> null); // TODO check user token
+                        ElectroClub.getInstance().getAndSelectGarageByMac(mDeviceAddress); // TODO check user token
                 } else {
                     // TODO: need to implement a logout
                     // logout after uncheck
@@ -1492,9 +1486,7 @@ public class MainActivity extends AppCompatActivity {
                     mBluetoothLeService.close();
                     toggleConnectToWheel();
                     if (WheelLog.AppConfig.getAutoUploadEc() && WheelLog.AppConfig.getEcToken() != null) {
-                        ElectroClub.getInstance().getAndSelectGarageByMacOrPrimary(
-                                mDeviceAddress,
-                                success -> null);
+                        ElectroClub.getInstance().getAndSelectGarageByMac(mDeviceAddress);
                     }
                 }
                 break;
@@ -1510,7 +1502,7 @@ public class MainActivity extends AppCompatActivity {
                 if (resultCode == RESULT_OK) {
                     WheelLog.AppConfig.setEcToken(ElectroClub.getInstance().getUserToken(), true);
                     WheelLog.AppConfig.setEcUserId(ElectroClub.getInstance().getUserId(), true);
-                    ElectroClub.getInstance().getAndSelectGarageByMacOrPrimary(mDeviceAddress, s -> null);
+                    ElectroClub.getInstance().getAndSelectGarageByMac(mDeviceAddress);
                 } else {
                     WheelLog.AppConfig.setAutoUploadEc(false, true);
                     WheelLog.AppConfig.setEcToken(null, true);

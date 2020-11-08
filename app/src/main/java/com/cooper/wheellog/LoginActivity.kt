@@ -10,7 +10,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.textfield.TextInputLayout
-
+import kotlinx.coroutines.*
 
 class LoginActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,11 +31,14 @@ class LoginActivity : AppCompatActivity() {
                 .show()
 
         ok.setOnClickListener {
-            ElectroClub.instance.login(
-                    email.editText?.text.toString(),
-                    password.editText?.text.toString()
-            ) {
-                if (it) {
+            runBlocking {
+                val result = withTimeout(1000) {
+                    ElectroClub.instance.loginAsync(
+                            email.editText?.text.toString(),
+                            password.editText?.text.toString()
+                    )
+                }
+                if (result) {
                     setResult(RESULT_OK, Intent())
                     finish()
                 } else {

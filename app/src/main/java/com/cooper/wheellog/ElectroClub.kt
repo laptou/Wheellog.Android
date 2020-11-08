@@ -3,15 +3,14 @@ package com.cooper.wheellog
 import android.net.Uri
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
+import org.json.*
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
-
+import kotlinx.coroutines.*
+import kotlin.coroutines.*
 
 class ElectroClub {
 
@@ -22,6 +21,8 @@ class ElectroClub {
         const val UPLOAD_METHOD = "uploadTrack"
         const val GET_GARAGE_METHOD = "getUserGarage"
         const val GET_GARAGE_METHOD_FILTRED = "garage"
+        const val SUCCESS = 1
+        const val ERROR = 0
     }
 
     private val url = "https://electro.club/api/v1"
@@ -35,12 +36,12 @@ class ElectroClub {
     var userId: String? = null
     var lastError: String? = null
     var selectedGarage: String = "0"
-    var errorListener: ((String?, String?)->Unit)? = null
-    var successListener: ((String?, Any?)->Unit)? = null
+    var methodCallback: ((method: String, type: Int, message: Any?)->Unit)? = null
 
-    fun login(email: String, password: String, success: (Boolean) -> Unit) {
+    suspend fun loginAsync(email: String, password: String): Boolean {
         userToken = null
         userId = null
+
         val urlWithParams = Uri.parse(url)
                 .buildUpon()
                 .appendQueryParameter("method", LOGIN_METHOD)
@@ -55,54 +56,62 @@ class ElectroClub {
                 .method("GET", null)
                 .build()
 
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                userToken = null
-                userId = null
-                lastError = "[unexpected] " + e.message
-                errorListener?.invoke(LOGIN_METHOD, lastError)
-                e.printStackTrace()
-                success(false)
-            }
+        return suspendCoroutine { continuation ->
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    userToken = null
+                    userId = null
+                    lastError = "[unexpected] " + e.message
+                    methodCallback?.invoke(LOGIN_METHOD, ERROR, lastError)
+                    e.printStackTrace()
+                    continuation.resume(false)
+                }
 
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val json = JSONObject(response.body!!.string())
-                    val nickname: String
-                    if (!response.isSuccessful) {
-                        userToken = null
-                        userId = null
-                        parseError(json)
-                        errorListener?.invoke(LOGIN_METHOD, lastError)
-                        return
-                    } else {
-                        val userObj = json.getObjectSafe("data")?.getObjectSafe("user")
-                        if (userObj != null) {
-                            userToken = userObj.getString("user_token")
-                            userId = userObj.getString("user_id")
-                            nickname = userObj.getString("nickname")
-                        } else {
+                override fun onResponse(call: Call, response: Response) {
+                    response.use {
+                        val json = JSONObject(response.body!!.string())
+                        val nickname: String
+                        if (!response.isSuccessful) {
                             userToken = null
                             userId = null
+                            parseError(json)
+                            methodCallback?.invoke(LOGIN_METHOD, ERROR, lastError)
+                            continuation.resume(false)
                             return
+                        } else {
+                            val userObj = json.getObjectSafe("data")?.getObjectSafe("user")
+                            if (userObj != null) {
+                                userToken = userObj.getString("user_token")
+                                userId = userObj.getString("user_id")
+                                nickname = userObj.getString("nickname")
+                            } else {
+                                userToken = null
+                                userId = null
+                                continuation.resume(false)
+                                return
+                            }
                         }
-                    }
 
-                    WheelLog.AppConfig.setEcUserId(userId)
-                    WheelLog.AppConfig.setEcToken(userToken)
-                    successListener?.invoke(LOGIN_METHOD, nickname)
-                    success(true)
+                        WheelLog.AppConfig.setEcUserId(userId)
+                        WheelLog.AppConfig.setEcToken(userToken)
+                        methodCallback?.invoke(LOGIN_METHOD, SUCCESS, nickname)
+                        continuation.resume(true)
+                    }
                 }
-            }
-        })
+            })
+        }
     }
 
-    fun uploadTrack(data: ByteArray, fileName: String, verified: Boolean) {
+    fun uploadTrack(data: ByteArray, fileName: String, verified: Boolean): Boolean = runBlocking {
+        return@runBlocking async { uploadTrackAsync(data, fileName, verified) }.await()
+    }
+
+    suspend fun uploadTrackAsync(data: ByteArray, fileName: String, verified: Boolean): Boolean {
         if (userToken == null)
         {
             lastError = "Missing parameters"
-            errorListener?.invoke(UPLOAD_METHOD, lastError)
-            return
+            methodCallback?.invoke(UPLOAD_METHOD, ERROR, lastError)
+            return false
         }
         val calendar = Calendar.getInstance(TimeZone.getTimeZone("GMT"), Locale.getDefault())
         val currentLocalTime = calendar.time
@@ -128,48 +137,61 @@ class ElectroClub {
                 .method("POST", bodyBuilder.build())
                 .build()
 
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                lastError = "[unexpected] " + e.message
-                errorListener?.invoke(UPLOAD_METHOD, lastError)
-                e.printStackTrace()
-            }
+        return suspendCoroutine { continuation ->
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    lastError = "[unexpected] " + e.message
+                    methodCallback?.invoke(UPLOAD_METHOD, ERROR, lastError)
+                    e.printStackTrace()
+                    continuation.resume(false)
+                }
 
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val json = JSONObject(response.body!!.string())
-                    if (!response.isSuccessful) {
-                        parseError(json)
-                        errorListener?.invoke(UPLOAD_METHOD, lastError)
-                    } else {
-                        successListener?.invoke(UPLOAD_METHOD, json)
+                override fun onResponse(call: Call, response: Response) {
+                    response.use {
+                        val json = JSONObject(response.body!!.string())
+                        if (!response.isSuccessful) {
+                            parseError(json)
+                            methodCallback?.invoke(UPLOAD_METHOD, ERROR, lastError)
+                            continuation.resume(false)
+                        } else {
+                            methodCallback?.invoke(UPLOAD_METHOD, SUCCESS, json)
+                            continuation.resume(true)
+                        }
                     }
                 }
-            }
-        })
+            })
+        }
     }
 
-    fun getAndSelectGarageByMacOrPrimary(mac: String, success: (String?) -> Unit)
-    {
-        if (selectedGarage != "0")
-            return // already selected
+    fun getAndSelectGarageByMac(mac: String): Boolean = runBlocking {
+        return@runBlocking async { getAndSelectGarageByMacAsync(mac) }.await()
+    }
 
-        getGarage {
-            val len = it.length() - 1
-            var primaryId: String? = null
+    suspend fun getAndSelectGarageByMacAsync(mac: String): Boolean {
+        if (selectedGarage != "0") {
+            return true // already selected
+        }
+        val transportList = getGarageAsync()
+        if (transportList.length() == 0) {
+            return false
+        }
+
+        return suspendCoroutine { continuation ->
+            val len = transportList.length() - 1
+            //var primaryId: String? = null
             for (i in 0..len) {
-                val g = it.getJSONObject(i)
-                val m = g.getStringSafe("MAC")
-                val isPrimary = g.getStringSafe("primary") == "1"
+                val transport = transportList.getJSONObject(i)
+                val m = transport.getStringSafe("MAC")
+                //val isPrimary = transport.getStringSafe("primary") == "1"
                 if (m != null && m == mac) {
-                    selectedGarage = it.getJSONObject(i).getString("id")
-                    success(selectedGarage)
-                    successListener?.invoke(GET_GARAGE_METHOD_FILTRED, it.getJSONObject(i).getString("name"))
+                    selectedGarage = transport.getString("id")
+                    continuation.resume(true)
+                    methodCallback?.invoke(GET_GARAGE_METHOD_FILTRED, SUCCESS, transport.getString("name"))
                     break
                 }
-                if (isPrimary) {
-                    primaryId = it.getJSONObject(i).getString("id")
-                }
+                /*if (isPrimary) {
+                    primaryId = transport.getString("id")
+                }*/
             }
 
             // TODO todo todo need UI
@@ -181,12 +203,12 @@ class ElectroClub {
         }
     }
 
-    fun getGarage(success: (JSONArray) -> Unit) {
+    suspend fun getGarageAsync(): JSONArray {
         if (userToken == null || userId == null)
         {
             lastError = "Missing parameters"
-            errorListener?.invoke(GET_GARAGE_METHOD, lastError)
-            return
+            methodCallback?.invoke(GET_GARAGE_METHOD, ERROR, lastError)
+            return JSONArray()
         }
         val urlWithParams = Uri.parse(url)
                 .buildUpon()
@@ -202,33 +224,37 @@ class ElectroClub {
                 .method("GET", null)
                 .build()
 
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                lastError = "[unexpected] " + e.message
-                errorListener?.invoke("login", lastError)
-                e.printStackTrace()
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val json = JSONObject(response.body!!.string())
-                    if (!response.isSuccessful) {
-                        parseError(json)
-                        errorListener?.invoke(GET_GARAGE_METHOD, lastError)
-                    } else {
-                        val data = json.getObjectSafe("data")
-                        if (data == null || !data.has("transport_list")) {
-                            lastError = "no transport"
-                            errorListener?.invoke(GET_GARAGE_METHOD, lastError)
-                            return
-                        }
-                        val transportList = data.getJSONArray("transport_list")
-                        success(transportList)
-                    }
-                    successListener?.invoke(GET_GARAGE_METHOD, userToken)
+        return suspendCoroutine { continuation ->
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    lastError = "[unexpected] " + e.message
+                    methodCallback?.invoke(GET_GARAGE_METHOD, ERROR, lastError)
+                    e.printStackTrace()
+                    continuation.resume(JSONArray())
                 }
-            }
-        })
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.use {
+                        val json = JSONObject(response.body!!.string())
+                        if (!response.isSuccessful) {
+                            parseError(json)
+                            methodCallback?.invoke(GET_GARAGE_METHOD, ERROR, lastError)
+                            continuation.resume(JSONArray())
+                        } else {
+                            val data = json.getObjectSafe("data")
+                            if (data == null || !data.has("transport_list")) {
+                                lastError = "no transport"
+                                methodCallback?.invoke(GET_GARAGE_METHOD, ERROR, lastError)
+                                return
+                            }
+                            val transportList = data.getJSONArray("transport_list")
+                            methodCallback?.invoke(GET_GARAGE_METHOD, SUCCESS, transportList.length())
+                            continuation.resume(transportList)
+                        }
+                    }
+                }
+            })
+        }
     }
 
     private fun parseError(jsonObject: JSONObject?) {
