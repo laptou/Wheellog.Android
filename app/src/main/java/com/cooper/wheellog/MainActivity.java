@@ -193,6 +193,10 @@ public class MainActivity extends AppCompatActivity {
             }
 
             loadPreferences();
+            if (true) { // TODO settings for write raw data
+                mBluetoothLeService.initFileRawData();
+            }
+
             if (mBluetoothLeService.getConnectionState() == BluetoothLeService.STATE_DISCONNECTED &&
                     mDeviceAddress != null && !mDeviceAddress.isEmpty()) {
                 mBluetoothLeService.setDeviceAddress(mDeviceAddress);
