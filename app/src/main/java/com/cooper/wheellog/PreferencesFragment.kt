@@ -19,7 +19,7 @@ import kotlinx.coroutines.*
 import timber.log.Timber
 
 
-class PreferencesFragment: PreferenceFragmentCompat(), OnSharedPreferenceChangeListener, IDataListener {
+class PreferencesFragment: PreferenceFragmentCompat(), OnSharedPreferenceChangeListener {
     private var mDataWarningDisplayed = false
     private var currentScreen = SettingsScreen.Main
 
@@ -27,7 +27,7 @@ class PreferencesFragment: PreferenceFragmentCompat(), OnSharedPreferenceChangeL
         addPreferencesFromResource(R.xml.preferences)
     }
 
-    override fun changeWheelType() {
+    fun changeWheelType() {
         switchSpecificSettingsIsVisible()
         hideShowSeekBarsAlarms()
     }

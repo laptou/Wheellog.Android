@@ -14,19 +14,15 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 class RawDataTest {
-
-    private var adapter: GotwayAdapter = GotwayAdapter()
     private lateinit var data: WheelData
 
     @Before
     fun setUp() {
         data = spyk(WheelData())
         every { data.bluetoothLeService.applicationContext } returns mockkClass(Context::class, relaxed = true)
-        data.wheelType = Constants.WHEEL_TYPE.GOTWAY
         WheelLog.AppConfig = mockkClass(AppConfig::class, relaxed = true)
         mockkStatic(WheelData::class)
         every { WheelData.getInstance() } returns data
-        every { WheelLog.AppConfig.getGotwayNegative() } returns 1
     }
 
     @After
@@ -35,10 +31,12 @@ class RawDataTest {
     }
 
     @Test
-    fun `decode with normal data`() {
+    fun `GW - decode with normal data`() {
         // Arrange.
+        val adapter = GotwayAdapter()
+        data.wheelType = Constants.WHEEL_TYPE.GOTWAY
         val inputStream: InputStream = File("src/test/resources/rawDecodeTest.csv").inputStream()
-        var sdf = SimpleDateFormat("HH:mm:ss.SSS")
+        val sdf = SimpleDateFormat("HH:mm:ss.SSS")
         val startTime = sdf.parse("11:50:50.123")
 
         val dataList = mutableListOf<String>()
@@ -55,8 +53,6 @@ class RawDataTest {
         // Act.
         dataList.forEach {
             val byteArray = it.hexToByteArray()
-
-            // TODO adapter
             adapter.decode(byteArray)
         }
 

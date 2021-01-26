@@ -285,10 +285,17 @@ public class BluetoothLeService extends Service {
             return;
         }
 
-        if (true && !fileUtilRawData.isNull()) { // TODO settings to write raw data
+        // RAW data
+        if (WheelLog.AppConfig.getEnableRawData()) {
+            if (fileUtilRawData.isNull()) {
+                String fileNameForRawData = sdf.format(new Date()) + ".csv";
+                fileUtilRawData.prepareFile(fileNameForRawData, WheelData.getInstance().getMac());
+            }
             fileUtilRawData.writeLine(String.format(Locale.US, "%s,%s",
                     sdf.format(WheelData.getInstance().getTimeStamp()),
                     StringUtil.toHexStringRaw(characteristic.getValue())));
+        } else if (!fileUtilRawData.isNull()) {
+            fileUtilRawData.close();
         }
 
         if (WheelData.getInstance().getWheelType() == WHEEL_TYPE.KINGSONG) {
@@ -412,13 +419,6 @@ public class BluetoothLeService extends Service {
         }
 
         return true;
-    }
-
-    public void initFileRawData() {
-        if (true) {
-            String fileNameForRawData = sdf.format(new Date()) + ".csv";
-            fileUtilRawData.prepareFile(fileNameForRawData, WheelData.getInstance().getMac());
-        }
     }
 
     public void setDeviceAddress(String address) {

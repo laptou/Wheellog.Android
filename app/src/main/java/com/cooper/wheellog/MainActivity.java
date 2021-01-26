@@ -193,9 +193,6 @@ public class MainActivity extends AppCompatActivity {
             }
 
             loadPreferences();
-            if (true) { // TODO settings for write raw data
-                mBluetoothLeService.initFileRawData();
-            }
 
             if (mBluetoothLeService.getConnectionState() == BluetoothLeService.STATE_DISCONNECTED &&
                     mDeviceAddress != null && !mDeviceAddress.isEmpty()) {
@@ -223,6 +220,7 @@ public class MainActivity extends AppCompatActivity {
                     break;
                 case Constants.ACTION_WHEEL_TYPE_CHANGED:
                     Timber.i("Wheel type switched");
+                    getPreferencesFragment().changeWheelType();
                     configureDisplay(WheelData.getInstance().getWheelType());
                     updateScreen(true);
                     break;
