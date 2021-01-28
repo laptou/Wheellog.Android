@@ -2,6 +2,7 @@ package com.cooper.wheellog;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothManager;
 import android.content.BroadcastReceiver;
@@ -45,6 +46,12 @@ import com.cooper.wheellog.utils.BaseAdapter;
 import com.cooper.wheellog.utils.Constants;
 import com.cooper.wheellog.utils.Constants.ALARM_TYPE;
 import com.cooper.wheellog.utils.Constants.WHEEL_TYPE;
+import com.cooper.wheellog.utils.InMotionAdapter;
+import com.cooper.wheellog.utils.InmotionAdapterV2;
+import com.cooper.wheellog.utils.KingsongAdapter;
+import com.cooper.wheellog.utils.NinebotAdapter;
+import com.cooper.wheellog.utils.NinebotZAdapter;
+import com.cooper.wheellog.utils.NotificationUtil;
 import com.cooper.wheellog.utils.StringUtil;
 import com.cooper.wheellog.views.DoubleClickListener;
 import com.cooper.wheellog.views.WheelView;
@@ -181,41 +188,81 @@ public class MainActivity extends AppCompatActivity {
     protected static final int RESULT_REQUEST_ENABLE_BT = 30;
     protected static final int RESULT_AUTH_REQUEST = 50;
 
-    private final ServiceConnection mServiceConnection = new ServiceConnection() {
+    private NotificationUtil mNotificationHandler;
 
+    private final ServiceConnection mBluetoothServiceConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName componentName, IBinder service) {
-            mBluetoothLeService = ((BluetoothLeService.LocalBinder) service).getService();
-            if (!mBluetoothLeService.initialize()) {
-                Timber.e(getResources().getString(R.string.error_bluetooth_not_initialised));
-                Toast.makeText(MainActivity.this, R.string.error_bluetooth_not_initialised, Toast.LENGTH_SHORT).show();
-                finish();
-            }
-
-            loadPreferences();
-            if (mBluetoothLeService.getConnectionState() == BluetoothLeService.STATE_DISCONNECTED &&
-                    mDeviceAddress != null && !mDeviceAddress.isEmpty()) {
-                mBluetoothLeService.setDeviceAddress(mDeviceAddress);
-                toggleConnectToWheel();
+            if (componentName.getClassName().equals(BluetoothLeService.class.getName())) {
+                mBluetoothLeService = ((BluetoothLeService.LocalBinder) service).getService();
+                if (!mBluetoothLeService.initialize()) {
+                    Timber.e(getResources().getString(R.string.error_bluetooth_not_initialised));
+                    Toast.makeText(MainActivity.this, R.string.error_bluetooth_not_initialised, Toast.LENGTH_SHORT).show();
+                    finish();
+                }
+                loadPreferences();
+                if (mBluetoothLeService.getConnectionState() == BluetoothLeService.STATE_DISCONNECTED &&
+                        mDeviceAddress != null && !mDeviceAddress.isEmpty()) {
+                    mBluetoothLeService.setDeviceAddress(mDeviceAddress);
+                    toggleConnectToWheel();
+                }
             }
         }
 
         @Override
         public void onServiceDisconnected(ComponentName componentName) {
-            mBluetoothLeService = null;
-            finish();
+            if (componentName.getClassName().equals(BluetoothLeService.class.getName())) {
+                mBluetoothLeService = null;
+                Timber.e("BluetoothLeService disconnected");
+                WheelData.getInstance().setConnected(false);
+            }
         }
     };
 
     private final BroadcastReceiver mBluetoothUpdateReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-
             switch (intent.getAction()) {
                 case Constants.ACTION_BLUETOOTH_CONNECTION_STATE:
                     int connectionState = intent.getIntExtra(Constants.INTENT_EXTRA_CONNECTION_STATE, BluetoothLeService.STATE_DISCONNECTED);
                     Timber.i("Bluetooth state = %d", connectionState);
                     setConnectionState(connectionState);
+                    WheelData.getInstance().setConnected(connectionState == BluetoothLeService.STATE_CONNECTED);
+                    switch (connectionState) {
+                        case BluetoothLeService.STATE_CONNECTED:
+                            if (!LoggingService.isInstanceCreated() && WheelLog.AppConfig.getAutoLog()) {
+                                ContextCompat.startForegroundService(getApplicationContext(), new Intent(getApplicationContext(), LoggingService.class));
+                            }
+                            if (WheelData.getInstance().getWheelType() == WHEEL_TYPE.KINGSONG) {
+                                KingsongAdapter.getInstance().requestNameData();
+                            }
+                            mNotificationHandler.setNotificationMessageId(R.string.connected);
+                            if (WheelLog.AppConfig.getAutoLog() && !LoggingService.isInstanceCreated()) {
+                                toggleLoggingService();
+                            }
+                            break;
+                        case BluetoothLeService.STATE_DISCONNECTED:
+                            switch (WheelData.getInstance().getWheelType()) {
+                                case INMOTION:
+                                    InMotionAdapter.newInstance();
+                                case INMOTION_V2:
+                                    InmotionAdapterV2.newInstance();
+                                case NINEBOT_Z:
+                                    NinebotZAdapter.newInstance();
+                                case NINEBOT:
+                                    NinebotAdapter.newInstance();
+                            }
+                            mNotificationHandler.setNotificationMessageId(R.string.disconnected);
+                            break;
+                        case BluetoothLeService.STATE_CONNECTING:
+                            if (intent.hasExtra(Constants.INTENT_EXTRA_BLE_AUTO_CONNECT)) {
+                                mNotificationHandler.setNotificationMessageId(R.string.searching);
+                            } else {
+                                mNotificationHandler.setNotificationMessageId(R.string.connecting);
+                            }
+                            break;
+                    }
+                    mNotificationHandler.updateNotification();
                     break;
                 case Constants.ACTION_WHEEL_TYPE_CHANGED:
                     Timber.i("Wheel type switched");
@@ -224,19 +271,15 @@ public class MainActivity extends AppCompatActivity {
                     updateScreen(true);
                     break;
                 case Constants.ACTION_WHEEL_DATA_AVAILABLE:
-                    if (WheelData.getInstance().getWheelType() == WHEEL_TYPE.KINGSONG) {
-                        if (WheelData.getInstance().getName().isEmpty())
-                            sendBroadcast(new Intent(Constants.ACTION_REQUEST_KINGSONG_NAME_DATA));
-                        else if (WheelData.getInstance().getSerial().isEmpty())
-                            sendBroadcast(new Intent(Constants.ACTION_REQUEST_KINGSONG_SERIAL_DATA));
-                    }
                     if (intent.hasExtra(Constants.INTENT_EXTRA_WHEEL_SETTINGS)) {
                         setWheelPreferences();
                     }
                     updateScreen(intent.hasExtra(Constants.INTENT_EXTRA_GRAPH_UPDATE_AVILABLE));
+                    mNotificationHandler.updateNotification();
                     break;
                 case Constants.ACTION_PEBBLE_SERVICE_TOGGLED:
                     setMenuIconStates();
+                    mNotificationHandler.updateNotification();
                     break;
                 case Constants.ACTION_LOGGING_SERVICE_TOGGLED:
                     boolean running = intent.getBooleanExtra(Constants.INTENT_EXTRA_IS_RUNNING, false);
@@ -247,6 +290,7 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                     setMenuIconStates();
+                    mNotificationHandler.updateNotification();
                     break;
                 case Constants.ACTION_PREFERENCE_CHANGED:
                     int settingsKey = intent.getIntExtra(Constants.INTENT_EXTRA_SETTINGS_KEY, -1);
@@ -256,7 +300,6 @@ public class MainActivity extends AppCompatActivity {
                     Timber.i("Reset battery lowest");
                     wheelView.resetBatteryLowest();
                     break;
-
                 case Constants.ACTION_WHEEL_TYPE_RECOGNIZED:
                     if (WheelData.getInstance().getWheelType() == WHEEL_TYPE.NINEBOT_Z
                             && WheelData.getInstance().getProtoVer().equals("")) { // Hide bms for ninebot S2
@@ -278,10 +321,34 @@ public class MainActivity extends AppCompatActivity {
                         showSnackBar(getResources().getString(R.string.alarm_text_temperature), 3000);
                     }
                     break;
+                case Constants.NOTIFICATION_BUTTON_CONNECTION:
+                    toggleConnectToWheel();
+                    break;
+                case Constants.NOTIFICATION_BUTTON_LOGGING:
+                    toggleLogging();
+                    break;
+                case Constants.NOTIFICATION_BUTTON_WATCH:
+                    toggleWatch();
+                    break;
             }
         }
     };
 
+    private void toggleWatch() {
+        togglePebbleService();
+        if (WheelLog.AppConfig.getGarminConnectIqEnable())
+            toggleGarminConnectIQ();
+        else
+            stopGarminConnectIQ();
+    }
+
+    private void toggleLogging() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            toggleLoggingService();
+        } else {
+            MainActivityPermissionsDispatcher.toggleLoggingServiceLegacyWithCheck(this);
+        }
+    }
 
     private void setConnectionState(int connectionState) {
         switch (connectionState) {
@@ -943,8 +1010,10 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        if (onDestroyProcess)
+        if (onDestroyProcess) {
             android.os.Process.killProcess(android.os.Process.myPid());
+            return;
+        }
 
         super.onCreate(savedInstanceState);
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
@@ -974,12 +1043,12 @@ public class MainActivity extends AppCompatActivity {
         createPager();
 
         mDeviceAddress = WheelLog.AppConfig.getLastMac();
-        final Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
+        final Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
 
-        wheelView = (WheelView) findViewById(R.id.wheelView);
-        mDrawer = (DrawerLayout) findViewById(R.id.drawer_layout);
+        wheelView = findViewById(R.id.wheelView);
+        mDrawer = findViewById(R.id.drawer_layout);
 
         wheelView.setOnClickListener(new DoubleClickListener() {
             @Override
@@ -996,73 +1065,72 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        tvBms1Sn = (TextView) findViewById(R.id.tvBms1Sn);
-        tvBms2Sn = (TextView) findViewById(R.id.tvBms2Sn);
-        tvBms1Fw = (TextView) findViewById(R.id.tvBms1Fw);
-        tvBms2Fw = (TextView) findViewById(R.id.tvBms2Fw);
-        tvBms1FactoryCap = (TextView) findViewById(R.id.tvBms1FactoryCap);
-        tvBms2FactoryCap = (TextView) findViewById(R.id.tvBms2FactoryCap);
-        tvBms1ActualCap = (TextView) findViewById(R.id.tvBms1ActualCap);
-        tvBms2ActualCap = (TextView) findViewById(R.id.tvBms2ActualCap);
-        tvBms1Cycles = (TextView) findViewById(R.id.tvBms1Cycles);
-        tvBms2Cycles = (TextView) findViewById(R.id.tvBms2Cycles);
-        tvBms1ChrgCount = (TextView) findViewById(R.id.tvBms1ChrgCount);
-        tvBms2ChrgCount = (TextView) findViewById(R.id.tvBms2ChrgCount);
-        tvBms1MfgDate = (TextView) findViewById(R.id.tvBms1MfgDate);
-        tvBms2MfgDate = (TextView) findViewById(R.id.tvBms2MfgDate);
-        tvBms1Status = (TextView) findViewById(R.id.tvBms1Status);
-        tvBms2Status = (TextView) findViewById(R.id.tvBms2Status);
-        tvBms1RemCap = (TextView) findViewById(R.id.tvBms1RemCap);
-        tvBms2RemCap = (TextView) findViewById(R.id.tvBms2RemCap);
-        tvBms1RemPerc = (TextView) findViewById(R.id.tvBms1RemPerc);
-        tvBms2RemPerc = (TextView) findViewById(R.id.tvBms2RemPerc);
-        tvBms1Current = (TextView) findViewById(R.id.tvBms1Current);
-        tvBms2Current = (TextView) findViewById(R.id.tvBms2Current);
-        tvBms1Voltage = (TextView) findViewById(R.id.tvBms1Voltage);
-        tvBms2Voltage = (TextView) findViewById(R.id.tvBms2Voltage);
-        tvBms1Temp1 = (TextView) findViewById(R.id.tvBms1Temp1);
-        tvBms2Temp1 = (TextView) findViewById(R.id.tvBms2Temp1);
-        tvBms1Temp2 = (TextView) findViewById(R.id.tvBms1Temp2);
-        tvBms2Temp2 = (TextView) findViewById(R.id.tvBms2Temp2);
-        tvBms1Health = (TextView) findViewById(R.id.tvBms1Health);
-        tvBms2Health = (TextView) findViewById(R.id.tvBms2Health);
-        tvBms1Cell1 = (TextView) findViewById(R.id.tvBms1Cell1);
-        tvBms2Cell1 = (TextView) findViewById(R.id.tvBms2Cell1);
-        tvBms1Cell2 = (TextView) findViewById(R.id.tvBms1Cell2);
-        tvBms2Cell2 = (TextView) findViewById(R.id.tvBms2Cell2);
-        tvBms1Cell3 = (TextView) findViewById(R.id.tvBms1Cell3);
-        tvBms2Cell3 = (TextView) findViewById(R.id.tvBms2Cell3);
-        tvBms1Cell4 = (TextView) findViewById(R.id.tvBms1Cell4);
-        tvBms2Cell4 = (TextView) findViewById(R.id.tvBms2Cell4);
-        tvBms1Cell5 = (TextView) findViewById(R.id.tvBms1Cell5);
-        tvBms2Cell5 = (TextView) findViewById(R.id.tvBms2Cell5);
-        tvBms1Cell6 = (TextView) findViewById(R.id.tvBms1Cell6);
-        tvBms2Cell6 = (TextView) findViewById(R.id.tvBms2Cell6);
-        tvBms1Cell7 = (TextView) findViewById(R.id.tvBms1Cell7);
-        tvBms2Cell7 = (TextView) findViewById(R.id.tvBms2Cell7);
-        tvBms1Cell8 = (TextView) findViewById(R.id.tvBms1Cell8);
-        tvBms2Cell8 = (TextView) findViewById(R.id.tvBms2Cell8);
-        tvBms1Cell9 = (TextView) findViewById(R.id.tvBms1Cell9);
-        tvBms2Cell9 = (TextView) findViewById(R.id.tvBms2Cell9);
-        tvBms1Cell10 = (TextView) findViewById(R.id.tvBms1Cell10);
-        tvBms2Cell10 = (TextView) findViewById(R.id.tvBms2Cell10);
-        tvBms1Cell11 = (TextView) findViewById(R.id.tvBms1Cell11);
-        tvBms2Cell11 = (TextView) findViewById(R.id.tvBms2Cell11);
-        tvBms1Cell12 = (TextView) findViewById(R.id.tvBms1Cell12);
-        tvBms2Cell12 = (TextView) findViewById(R.id.tvBms2Cell12);
-        tvBms1Cell13 = (TextView) findViewById(R.id.tvBms1Cell13);
-        tvBms2Cell13 = (TextView) findViewById(R.id.tvBms2Cell13);
-        tvBms1Cell14 = (TextView) findViewById(R.id.tvBms1Cell14);
-        tvBms2Cell14 = (TextView) findViewById(R.id.tvBms2Cell14);
-        tvTitleBms1Cell15 = (TextView) findViewById(R.id.tvTitleBms1Cell15);
-        tvBms1Cell15 = (TextView) findViewById(R.id.tvBms1Cell15);
-        tvTitleBms2Cell15 = (TextView) findViewById(R.id.tvTitleBms2Cell15);
-        tvBms2Cell15 = (TextView) findViewById(R.id.tvBms2Cell15);
-        tvTitleBms1Cell16 = (TextView) findViewById(R.id.tvTitleBms1Cell16);
-        tvBms1Cell16 = (TextView) findViewById(R.id.tvBms1Cell16);
-        tvTitleBms2Cell16 = (TextView) findViewById(R.id.tvTitleBms2Cell16);
-        tvBms2Cell16 = (TextView) findViewById(R.id.tvBms2Cell16);
-
+        tvBms1Sn = findViewById(R.id.tvBms1Sn);
+        tvBms2Sn = findViewById(R.id.tvBms2Sn);
+        tvBms1Fw = findViewById(R.id.tvBms1Fw);
+        tvBms2Fw = findViewById(R.id.tvBms2Fw);
+        tvBms1FactoryCap = findViewById(R.id.tvBms1FactoryCap);
+        tvBms2FactoryCap = findViewById(R.id.tvBms2FactoryCap);
+        tvBms1ActualCap = findViewById(R.id.tvBms1ActualCap);
+        tvBms2ActualCap = findViewById(R.id.tvBms2ActualCap);
+        tvBms1Cycles = findViewById(R.id.tvBms1Cycles);
+        tvBms2Cycles = findViewById(R.id.tvBms2Cycles);
+        tvBms1ChrgCount = findViewById(R.id.tvBms1ChrgCount);
+        tvBms2ChrgCount = findViewById(R.id.tvBms2ChrgCount);
+        tvBms1MfgDate = findViewById(R.id.tvBms1MfgDate);
+        tvBms2MfgDate = findViewById(R.id.tvBms2MfgDate);
+        tvBms1Status = findViewById(R.id.tvBms1Status);
+        tvBms2Status = findViewById(R.id.tvBms2Status);
+        tvBms1RemCap = findViewById(R.id.tvBms1RemCap);
+        tvBms2RemCap = findViewById(R.id.tvBms2RemCap);
+        tvBms1RemPerc = findViewById(R.id.tvBms1RemPerc);
+        tvBms2RemPerc = findViewById(R.id.tvBms2RemPerc);
+        tvBms1Current = findViewById(R.id.tvBms1Current);
+        tvBms2Current = findViewById(R.id.tvBms2Current);
+        tvBms1Voltage = findViewById(R.id.tvBms1Voltage);
+        tvBms2Voltage = findViewById(R.id.tvBms2Voltage);
+        tvBms1Temp1 = findViewById(R.id.tvBms1Temp1);
+        tvBms2Temp1 = findViewById(R.id.tvBms2Temp1);
+        tvBms1Temp2 = findViewById(R.id.tvBms1Temp2);
+        tvBms2Temp2 = findViewById(R.id.tvBms2Temp2);
+        tvBms1Health = findViewById(R.id.tvBms1Health);
+        tvBms2Health = findViewById(R.id.tvBms2Health);
+        tvBms1Cell1 = findViewById(R.id.tvBms1Cell1);
+        tvBms2Cell1 = findViewById(R.id.tvBms2Cell1);
+        tvBms1Cell2 = findViewById(R.id.tvBms1Cell2);
+        tvBms2Cell2 = findViewById(R.id.tvBms2Cell2);
+        tvBms1Cell3 = findViewById(R.id.tvBms1Cell3);
+        tvBms2Cell3 = findViewById(R.id.tvBms2Cell3);
+        tvBms1Cell4 = findViewById(R.id.tvBms1Cell4);
+        tvBms2Cell4 = findViewById(R.id.tvBms2Cell4);
+        tvBms1Cell5 = findViewById(R.id.tvBms1Cell5);
+        tvBms2Cell5 = findViewById(R.id.tvBms2Cell5);
+        tvBms1Cell6 = findViewById(R.id.tvBms1Cell6);
+        tvBms2Cell6 = findViewById(R.id.tvBms2Cell6);
+        tvBms1Cell7 = findViewById(R.id.tvBms1Cell7);
+        tvBms2Cell7 = findViewById(R.id.tvBms2Cell7);
+        tvBms1Cell8 = findViewById(R.id.tvBms1Cell8);
+        tvBms2Cell8 = findViewById(R.id.tvBms2Cell8);
+        tvBms1Cell9 = findViewById(R.id.tvBms1Cell9);
+        tvBms2Cell9 = findViewById(R.id.tvBms2Cell9);
+        tvBms1Cell10 = findViewById(R.id.tvBms1Cell10);
+        tvBms2Cell10 = findViewById(R.id.tvBms2Cell10);
+        tvBms1Cell11 = findViewById(R.id.tvBms1Cell11);
+        tvBms2Cell11 = findViewById(R.id.tvBms2Cell11);
+        tvBms1Cell12 = findViewById(R.id.tvBms1Cell12);
+        tvBms2Cell12 = findViewById(R.id.tvBms2Cell12);
+        tvBms1Cell13 = findViewById(R.id.tvBms1Cell13);
+        tvBms2Cell13 = findViewById(R.id.tvBms2Cell13);
+        tvBms1Cell14 = findViewById(R.id.tvBms1Cell14);
+        tvBms2Cell14 = findViewById(R.id.tvBms2Cell14);
+        tvTitleBms1Cell15 = findViewById(R.id.tvTitleBms1Cell15);
+        tvBms1Cell15 = findViewById(R.id.tvBms1Cell15);
+        tvTitleBms2Cell15 = findViewById(R.id.tvTitleBms2Cell15);
+        tvBms2Cell15 = findViewById(R.id.tvBms2Cell15);
+        tvTitleBms1Cell16 = findViewById(R.id.tvTitleBms1Cell16);
+        tvBms1Cell16 = findViewById(R.id.tvBms1Cell16);
+        tvTitleBms2Cell16 = findViewById(R.id.tvTitleBms2Cell16);
+        tvBms2Cell16 = findViewById(R.id.tvBms2Cell16);
 
         mDrawer.addDrawerListener(new DrawerLayout.DrawerListener() {
             @Override
@@ -1086,10 +1154,10 @@ public class MainActivity extends AppCompatActivity {
         Typeface typefacePrime = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? getResources().getFont(R.font.prime)
                 : ResourcesCompat.getFont(this, R.font.prime);
-        TextClock textClock = (TextClock) findViewById(R.id.textClock);
+        TextClock textClock = findViewById(R.id.textClock);
         textClock.setTypeface(typefacePrime);
 
-        chart1 = (LineChart) findViewById(R.id.chart);
+        chart1 = findViewById(R.id.chart);
         chart1.setDrawGridBackground(false);
         chart1.getDescription().setEnabled(false);
         chart1.setHardwareAccelerationEnabled(true);
@@ -1101,8 +1169,8 @@ public class MainActivity extends AppCompatActivity {
 
         YAxis leftAxis = chart1.getAxisLeft();
         YAxis rightAxis = chart1.getAxisRight();
-        leftAxis.setAxisMinValue(0f);
-        rightAxis.setAxisMinValue(0f);
+        leftAxis.setAxisMinimum(0f);
+        rightAxis.setAxisMinimum(0f);
         leftAxis.setDrawGridLines(false);
         rightAxis.setDrawGridLines(false);
         leftAxis.setTextColor(getResources().getColor(android.R.color.white));
@@ -1129,7 +1197,6 @@ public class MainActivity extends AppCompatActivity {
         // Checks if Bluetooth is supported on the device.
         if (mBluetoothAdapter == null) {
             Toast.makeText(this, R.string.error_bluetooth_not_supported, Toast.LENGTH_SHORT).show();
-            //finish();
         } else if (!mBluetoothAdapter.isEnabled()) {
             // Ensures Bluetooth is enabled on the device.  If Bluetooth is not currently enabled,
             // fire an intent to display a dialog asking the user to grant permission to enable it.
@@ -1138,6 +1205,9 @@ public class MainActivity extends AppCompatActivity {
         } else {
             startBluetoothService();
         }
+
+        mNotificationHandler = new NotificationUtil(this);
+        mNotificationHandler.updateNotification();
     }
 
     @Override
@@ -1174,28 +1244,24 @@ public class MainActivity extends AppCompatActivity {
         stopLoggingService();
         WheelData.getInstance().full_reset();
         if (mBluetoothLeService != null) {
-            unbindService(mServiceConnection);
-            stopService(new Intent(getApplicationContext(), BluetoothLeService.class));
+            unbindService(mBluetoothServiceConnection);
             mBluetoothLeService = null;
         }
         super.onDestroy();
         onDestroyProcess = true;
-        new CountDownTimer(60000, 100) {
-
+        new CountDownTimer(60000 /* 1 min */, 1000) {
             @Override
             public void onTick(long millisUntilFinished) {
-                // do something after 1s
+                if (!LoggingService.isInstanceCreated()) {
+                    onFinish();
+                }
             }
-
             @Override
             public void onFinish() {
-
                 android.os.Process.killProcess(android.os.Process.myPid());
-                // do something end times 5s
             }
 
         }.start();
-
     }
 
     @Override
@@ -1219,18 +1285,10 @@ public class MainActivity extends AppCompatActivity {
                 toggleConnectToWheel();
                 return true;
             case R.id.miLogging:
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    toggleLoggingService();
-                } else {
-                    MainActivityPermissionsDispatcher.toggleLoggingServiceLegacyWithCheck(this);
-                }
+                toggleLogging();
                 return true;
             case R.id.miWatch:
-                togglePebbleService();
-                if (WheelLog.AppConfig.getGarminConnectIqEnable())
-                    toggleGarminConnectIQ();
-                else
-                    stopGarminConnectIQ();
+                toggleWatch();
                 return true;
             case R.id.miSettings:
                 mDrawer.openDrawer(GravityCompat.START, true);
@@ -1376,10 +1434,7 @@ public class MainActivity extends AppCompatActivity {
             snackbar = Snackbar
                     .make(mainView, "", Snackbar.LENGTH_LONG);
             snackbar.getView().setBackgroundResource(R.color.primary_dark);
-            snackbar.setAction(android.R.string.ok, new View.OnClickListener() {
-                @Override
-                public void onClick(View view) {
-                }
+            snackbar.setAction(android.R.string.ok, view -> {
             });
         }
         snackbar.setDuration(timeout);
@@ -1421,7 +1476,6 @@ public class MainActivity extends AppCompatActivity {
 
     void toggleLoggingService() {
         Intent dataLoggerServiceIntent = new Intent(getApplicationContext(), LoggingService.class);
-
         if (LoggingService.isInstanceCreated())
             stopService(dataLoggerServiceIntent);
         else if (mConnectionState == BluetoothLeService.STATE_CONNECTED)
@@ -1456,12 +1510,13 @@ public class MainActivity extends AppCompatActivity {
 
     private void startBluetoothService() {
         Intent bluetoothServiceIntent = new Intent(getApplicationContext(), BluetoothLeService.class);
-        ContextCompat.startForegroundService(this, bluetoothServiceIntent);
-        bindService(bluetoothServiceIntent, mServiceConnection, BIND_AUTO_CREATE);
+        bindService(bluetoothServiceIntent, mBluetoothServiceConnection, BIND_AUTO_CREATE);
     }
 
     private void toggleConnectToWheel() {
-        sendBroadcast(new Intent(Constants.ACTION_REQUEST_CONNECTION_TOGGLE));
+        if (mBluetoothLeService != null) {
+            mBluetoothLeService.toggleConnectToWheel();
+        }
     }
 
     @NeedsPermission(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -1536,6 +1591,9 @@ public class MainActivity extends AppCompatActivity {
         intentFilter.addAction(Constants.ACTION_WHEEL_TYPE_RECOGNIZED);
         intentFilter.addAction(Constants.ACTION_ALARM_TRIGGERED);
         intentFilter.addAction(Constants.ACTION_WHEEL_TYPE_CHANGED);
+        intentFilter.addAction(Constants.NOTIFICATION_BUTTON_CONNECTION);
+        intentFilter.addAction(Constants.NOTIFICATION_BUTTON_WATCH);
+        intentFilter.addAction(Constants.NOTIFICATION_BUTTON_LOGGING);
         return intentFilter;
     }
 

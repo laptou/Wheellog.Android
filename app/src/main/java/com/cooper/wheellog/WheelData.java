@@ -1234,7 +1234,7 @@ public class WheelData {
         if (mWheelType == WHEEL_TYPE.KINGSONG) {
             mCalculatedPwm = (double)mOutput/100.0;
         } else {
-            mCalculatedPwm = ((float) mSpeed / 100.0) / ((WheelLog.AppConfig.getRotationSpeed() / WheelLog.AppConfig.getRotationVoltage()) * ((float) mVoltage / 100.0) * WheelLog.AppConfig.getPowerFactor());
+            mCalculatedPwm =((float) mSpeed / 100.0) / (((float)WheelLog.AppConfig.getRotationSpeed() / (float)WheelLog.AppConfig.getRotationVoltage()) * ((float) mVoltage / 100.0) * WheelLog.AppConfig.getPowerFactor());
         }
         setMaxPwm(mCalculatedPwm);
         if (mWheelType == WHEEL_TYPE.GOTWAY || mWheelType == WHEEL_TYPE.VETERAN) {
@@ -1252,7 +1252,6 @@ public class WheelData {
 		}
 		
         if (graph_last_update_time + GRAPH_UPDATE_INTERVAL < Calendar.getInstance().getTimeInMillis()) {
-
             graph_last_update_time = Calendar.getInstance().getTimeInMillis();
             intent.putExtra(Constants.INTENT_EXTRA_GRAPH_UPDATE_AVILABLE, true);
             currentAxis.add((float) getCurrentDouble());
@@ -1263,7 +1262,6 @@ public class WheelData {
                 currentAxis.remove(0);
                 xAxis.remove(0);
             }
-			
         }
 
         if (WheelLog.AppConfig.getAlarmsEnabled())
@@ -1315,21 +1313,21 @@ public class WheelData {
     public void setWheelTiltHorizon(int value) {mWheelTiltHorizon = value;}
 
     void full_reset() {
-        if (mWheelType == WHEEL_TYPE.INMOTION) InMotionAdapter.getInstance().stopTimer();
-        if (mWheelType == WHEEL_TYPE.INMOTION_V2) InmotionAdapterV2.getInstance().stopTimer();
+        if (mWheelType == WHEEL_TYPE.INMOTION) InMotionAdapter.stopTimer();
+        if (mWheelType == WHEEL_TYPE.INMOTION_V2) InmotionAdapterV2.stopTimer();
         if (mWheelType == WHEEL_TYPE.NINEBOT_Z) {
-            if (protoVer.compareTo("S2")==0) {
+            if (protoVer.compareTo("S2") == 0) {
                 Timber.i("Ninebot S2 stop!");
-                NinebotAdapter.getInstance().stopTimer();
-            } else if (protoVer.compareTo("Mini")==0) {
+                NinebotAdapter.stopTimer();
+            } else if (protoVer.compareTo("Mini") == 0) {
                 Timber.i("Ninebot Mini stop!");
-                NinebotAdapter.getInstance().stopTimer();
-            }   else {
+                NinebotAdapter.stopTimer();
+            } else {
                 Timber.i("Ninebot Z stop!");
-                NinebotZAdapter.getInstance().stopTimer();
+                NinebotZAdapter.stopTimer();
             }
         }
-        if (mWheelType == WHEEL_TYPE.NINEBOT) NinebotAdapter.getInstance().stopTimer();
+        if (mWheelType == WHEEL_TYPE.NINEBOT) NinebotAdapter.stopTimer();
         mBluetoothLeService = null;
         mWheelType = WHEEL_TYPE.Unknown;
         xAxis.clear();

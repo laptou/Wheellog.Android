@@ -226,8 +226,6 @@ public class PebbleService extends Service {
         sendBroadcast(serviceStartedIntent);
         mHandler.post(mSendPebbleData);
 
-        startForeground(Constants.MAIN_NOTIFICATION_ID, NotificationUtil.getNotification());
-        //startForeground(Constants.NOTIFICATION_ID_PEBBLE, mNotification);
         Timber.d("PebbleConnectivity Started");
         return START_STICKY;
     }
@@ -247,7 +245,6 @@ public class PebbleService extends Service {
         serviceStartedIntent.putExtra(Constants.INTENT_EXTRA_IS_RUNNING, false);
         sendBroadcast(serviceStartedIntent);
         stopForeground(true);
-        stopSelf();
         Timber.i("PebbleConnectivity Stopped");
     }
 
