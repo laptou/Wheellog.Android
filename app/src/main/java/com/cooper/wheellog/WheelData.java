@@ -8,7 +8,6 @@ import android.content.Intent;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
-import android.media.MediaPlayer;
 import android.os.Handler;
 import android.os.Vibrator;
 
@@ -1099,18 +1098,6 @@ public class WheelData {
         timerCurrent.schedule(stopCurrentAlarmExecuring, 170);
     }
 
-    private void playWarningSpeed(Context mContext) {
-        MediaPlayer mp1 = MediaPlayer.create(mContext, R.raw.sound_warning_speed);
-        mp1.start();
-        mp1.setOnCompletionListener(mp11 -> mp11.release());
-    }
-
-    private void playRecommendSpeed(Context mContext) {
-        MediaPlayer mp1 = MediaPlayer.create(mContext, R.raw.warning_pwm);
-        mp1.start();
-        mp1.setOnCompletionListener(mp11 -> mp11.release());
-    }
-
     private void checkAlarmStatus(Context mContext) {
         // SPEED ALARM
         if (!mSpeedAlarmExecuting) {
@@ -1129,12 +1116,12 @@ public class WheelData {
                     int warningSpeedPeriod = WheelLog.AppConfig.getWarningSpeedPeriod();
                     if (warningPwm != 0 && warningSpeedPeriod != 0 && mCalculatedPwm >= warningPwm && (System.currentTimeMillis() - mLastPlayWarningSpeedTime) > warningSpeedPeriod) {
                         mLastPlayWarningSpeedTime = System.currentTimeMillis();
-                        playRecommendSpeed(mContext);
+                        SomeUtil.playSound(mContext, R.raw.warning_pwm);
                     } else {
                         int warningSpeed = WheelLog.AppConfig.getWarningSpeed();
                         if (warningSpeed != 0 && warningSpeedPeriod != 0 && getSpeedDouble() >= warningSpeed && (System.currentTimeMillis() - mLastPlayWarningSpeedTime) > warningSpeedPeriod) {
                             mLastPlayWarningSpeedTime = System.currentTimeMillis();
-                            playWarningSpeed(mContext);
+                            SomeUtil.playSound(mContext, R.raw.sound_warning_speed);
                         }
                     }
                 }
