@@ -294,6 +294,7 @@ public class BluetoothLeService extends Service {
         if (mBluetoothGatt != null && mBluetoothGatt.getDevice().getAddress().equals(mBluetoothDeviceAddress)) {
             Timber.i("Trying to use an existing mBluetoothGatt for connection.");
             if (mBluetoothGatt.connect()) {
+                WheelData.getInstance().setBtName(mBluetoothGatt.getDevice().getName());
                 mConnectionState = STATE_CONNECTING;
                 broadcastConnectionUpdate(mConnectionState);
                 return true;
@@ -519,7 +520,7 @@ public class BluetoothLeService extends Service {
         TimerTask beepTimerTask = new TimerTask() {
             @Override
             public void run() {
-                timerTicks += 1;
+                timerTicks++;
                 if (timerTicks * noConnectionSound > 300000) {
                     stopBeepTimer();
                 }
