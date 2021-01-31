@@ -2,9 +2,7 @@ package com.cooper.wheellog;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
-import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -172,7 +170,6 @@ public class MainActivity extends AppCompatActivity {
     TextView tvTitleBms2Cell16;
     TextView tvBms2Cell16;
 
-    private BluetoothLeService mBluetoothLeService;
     private BluetoothAdapter mBluetoothAdapter;
     private String mDeviceAddress;
     private int mConnectionState = BluetoothLeService.STATE_DISCONNECTED;
@@ -182,28 +179,36 @@ public class MainActivity extends AppCompatActivity {
     private ArrayList<String> xAxis_labels = new ArrayList<>();
     private boolean use_mph = false;
     private DrawerLayout mDrawer;
+    private SimpleDateFormat timeFormatter = new SimpleDateFormat("HH:mm:ss", Locale.US);
+    private NotificationUtil mNotificationHandler;
     //endregion
 
     protected static final int RESULT_DEVICE_SCAN_REQUEST = 20;
     protected static final int RESULT_REQUEST_ENABLE_BT = 30;
     protected static final int RESULT_AUTH_REQUEST = 50;
 
-    private NotificationUtil mNotificationHandler;
+    private static Boolean onDestroyProcess = false;
+
+    private BluetoothLeService getBluetoothLeService() {
+        return WheelData.getInstance().getBluetoothLeService();
+    }
 
     private final ServiceConnection mBluetoothServiceConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName componentName, IBinder service) {
             if (componentName.getClassName().equals(BluetoothLeService.class.getName())) {
-                mBluetoothLeService = ((BluetoothLeService.LocalBinder) service).getService();
-                if (!mBluetoothLeService.initialize()) {
+                BluetoothLeService bluetoothLeService = ((BluetoothLeService.LocalBinder) service).getService();
+                WheelData.getInstance().setBluetoothLeService(bluetoothLeService);
+
+                if (!bluetoothLeService.initialize()) {
                     Timber.e(getResources().getString(R.string.error_bluetooth_not_initialised));
                     Toast.makeText(MainActivity.this, R.string.error_bluetooth_not_initialised, Toast.LENGTH_SHORT).show();
                     finish();
                 }
                 loadPreferences();
-                if (mBluetoothLeService.getConnectionState() == BluetoothLeService.STATE_DISCONNECTED &&
+                if (bluetoothLeService.getConnectionState() == BluetoothLeService.STATE_DISCONNECTED &&
                         mDeviceAddress != null && !mDeviceAddress.isEmpty()) {
-                    mBluetoothLeService.setDeviceAddress(mDeviceAddress);
+                    bluetoothLeService.setDeviceAddress(mDeviceAddress);
                     toggleConnectToWheel();
                 }
             }
@@ -212,14 +217,43 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onServiceDisconnected(ComponentName componentName) {
             if (componentName.getClassName().equals(BluetoothLeService.class.getName())) {
-                mBluetoothLeService = null;
-                Timber.e("BluetoothLeService disconnected");
+                WheelData.getInstance().setBluetoothLeService(null);
                 WheelData.getInstance().setConnected(false);
+                Timber.e("BluetoothLeService disconnected");
             }
         }
     };
 
-    private final BroadcastReceiver mBluetoothUpdateReceiver = new BroadcastReceiver() {
+    private void setConnectionState(int connectionState) {
+        switch (connectionState) {
+            case BluetoothLeService.STATE_CONNECTED:
+                configureDisplay(WheelData.getInstance().getWheelType());
+                if (mDeviceAddress != null && !mDeviceAddress.isEmpty()) {
+                    WheelLog.AppConfig.setLastMac(mDeviceAddress);
+                    if (WheelLog.AppConfig.getAutoUploadEc() && WheelLog.AppConfig.getEcToken() != null) {
+                        ElectroClub.getInstance().getAndSelectGarageByMacOrPrimary(WheelLog.AppConfig.getLastMac(), s -> null);
+                    }
+                }
+                hideSnackBar();
+                break;
+            case BluetoothLeService.STATE_CONNECTING:
+                if (mConnectionState == BluetoothLeService.STATE_CONNECTING) {
+                    showSnackBar(R.string.bluetooth_direct_connect_failed);
+                } else if (getBluetoothLeService() != null && getBluetoothLeService().getDisconnectTime() != null) {
+                    showSnackBar(
+                            getString(R.string.connection_lost_at,
+                                    timeFormatter.format(getBluetoothLeService().getDisconnectTime())),
+                            Snackbar.LENGTH_INDEFINITE);
+                }
+                break;
+            case BluetoothLeService.STATE_DISCONNECTED:
+                break;
+        }
+        mConnectionState = connectionState;
+        setMenuIconStates();
+    }
+
+    private final BroadcastReceiver mMainBroadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             switch (intent.getAction()) {
@@ -231,15 +265,12 @@ public class MainActivity extends AppCompatActivity {
                     switch (connectionState) {
                         case BluetoothLeService.STATE_CONNECTED:
                             if (!LoggingService.isInstanceCreated() && WheelLog.AppConfig.getAutoLog()) {
-                                ContextCompat.startForegroundService(getApplicationContext(), new Intent(getApplicationContext(), LoggingService.class));
+                                toggleLoggingService();
                             }
                             if (WheelData.getInstance().getWheelType() == WHEEL_TYPE.KINGSONG) {
                                 KingsongAdapter.getInstance().requestNameData();
                             }
                             mNotificationHandler.setNotificationMessageId(R.string.connected);
-                            if (WheelLog.AppConfig.getAutoLog() && !LoggingService.isInstanceCreated()) {
-                                toggleLoggingService();
-                            }
                             break;
                         case BluetoothLeService.STATE_DISCONNECTED:
                             switch (WheelData.getInstance().getWheelType()) {
@@ -348,38 +379,6 @@ public class MainActivity extends AppCompatActivity {
         } else {
             MainActivityPermissionsDispatcher.toggleLoggingServiceLegacyWithCheck(this);
         }
-    }
-
-    private void setConnectionState(int connectionState) {
-        switch (connectionState) {
-            case BluetoothLeService.STATE_CONNECTED:
-                configureDisplay(WheelData.getInstance().getWheelType());
-                if (mDeviceAddress != null && !mDeviceAddress.isEmpty()) {
-                    WheelLog.AppConfig.setLastMac(mDeviceAddress);
-                    if (WheelLog.AppConfig.getAutoUploadEc() && WheelLog.AppConfig.getEcToken() != null) {
-                        ElectroClub.getInstance().getAndSelectGarageByMacOrPrimary(WheelLog.AppConfig.getLastMac(), s -> null);
-                    }
-                }
-                hideSnackBar();
-                break;
-            case BluetoothLeService.STATE_CONNECTING:
-                if (mConnectionState == BluetoothLeService.STATE_CONNECTING) {
-                    showSnackBar(R.string.bluetooth_direct_connect_failed);
-
-                } else {
-                    if (mBluetoothLeService.getDisconnectTime() != null) {
-                        showSnackBar(
-                                getString(R.string.connection_lost_at,
-                                        new SimpleDateFormat("HH:mm:ss", Locale.US).format(mBluetoothLeService.getDisconnectTime())),
-                                Snackbar.LENGTH_INDEFINITE);
-                    }
-                }
-                break;
-            case BluetoothLeService.STATE_DISCONNECTED:
-                break;
-        }
-        mConnectionState = connectionState;
-        setMenuIconStates();
     }
 
     private void setWheelPreferences() {
@@ -1185,16 +1184,10 @@ public class MainActivity extends AppCompatActivity {
 
         if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
             Toast.makeText(this, R.string.ble_not_supported, Toast.LENGTH_SHORT).show();
-            //finish();
         }
 
-        // Initializes a Bluetooth adapter.  For API level 18 and above, get a reference to
-        // BluetoothAdapter through BluetoothManager.
-        BluetoothManager bluetoothManager =
-                (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
-        mBluetoothAdapter = bluetoothManager.getAdapter();
-
         // Checks if Bluetooth is supported on the device.
+        mBluetoothAdapter = BluetoothLeService.getAdapter(this);
         if (mBluetoothAdapter == null) {
             Toast.makeText(this, R.string.error_bluetooth_not_supported, Toast.LENGTH_SHORT).show();
         } else if (!mBluetoothAdapter.isEnabled()) {
@@ -1213,14 +1206,15 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onResume() {
         super.onResume();
-        if (mBluetoothLeService != null &&
-                mConnectionState != mBluetoothLeService.getConnectionState())
-            setConnectionState(mBluetoothLeService.getConnectionState());
+        if (getBluetoothLeService() != null && mConnectionState != getBluetoothLeService().getConnectionState()) {
+            setConnectionState(getBluetoothLeService().getConnectionState());
+        }
 
-        if (WheelData.getInstance().getWheelType() != WHEEL_TYPE.Unknown)
+        if (WheelData.getInstance().getWheelType() != WHEEL_TYPE.Unknown) {
             configureDisplay(WheelData.getInstance().getWheelType());
+        }
 
-        registerReceiver(mBluetoothUpdateReceiver, makeIntentFilter());
+        registerReceiver(mMainBroadcastReceiver, makeIntentFilter());
         updateScreen(true);
     }
 
@@ -1232,10 +1226,8 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onPause() {
         super.onPause();
-        unregisterReceiver(mBluetoothUpdateReceiver);
+        unregisterReceiver(mMainBroadcastReceiver);
     }
-
-    private static Boolean onDestroyProcess = false;
 
     @Override
     protected void onDestroy() {
@@ -1243,9 +1235,9 @@ public class MainActivity extends AppCompatActivity {
         stopGarminConnectIQ();
         stopLoggingService();
         WheelData.getInstance().full_reset();
-        if (mBluetoothLeService != null) {
+        if (getBluetoothLeService() != null) {
             unbindService(mBluetoothServiceConnection);
-            mBluetoothLeService = null;
+            WheelData.getInstance().setBluetoothLeService(null);
         }
         super.onDestroy();
         onDestroyProcess = true;
@@ -1454,8 +1446,7 @@ public class MainActivity extends AppCompatActivity {
         if (eventsTextView == null) {
             return;
         }
-        SimpleDateFormat formatter = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
-        String formattedMessage = String.format("[%s] %s\n", formatter.format(new Date()), message);
+        String formattedMessage = String.format("[%s] %s\n", timeFormatter.format(new Date()), message);
         if (eventsCurrentCount < eventsMaxCount) {
             eventsTextView.append(formattedMessage);
             eventsCurrentCount++;
@@ -1464,6 +1455,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    //region services
     private void stopLoggingService() {
         if (LoggingService.isInstanceCreated())
             toggleLoggingService();
@@ -1479,7 +1471,7 @@ public class MainActivity extends AppCompatActivity {
         if (LoggingService.isInstanceCreated())
             stopService(dataLoggerServiceIntent);
         else if (mConnectionState == BluetoothLeService.STATE_CONNECTED)
-            ContextCompat.startForegroundService(this, dataLoggerServiceIntent);
+            startService(dataLoggerServiceIntent);
     }
 
     private void stopPebbleService() {
@@ -1512,10 +1504,11 @@ public class MainActivity extends AppCompatActivity {
         Intent bluetoothServiceIntent = new Intent(getApplicationContext(), BluetoothLeService.class);
         bindService(bluetoothServiceIntent, mBluetoothServiceConnection, BIND_AUTO_CREATE);
     }
+    //endregion
 
     private void toggleConnectToWheel() {
-        if (mBluetoothLeService != null) {
-            mBluetoothLeService.toggleConnectToWheel();
+        if (getBluetoothLeService() != null) {
+            getBluetoothLeService().toggleConnectToWheel();
         }
     }
 
@@ -1542,12 +1535,12 @@ public class MainActivity extends AppCompatActivity {
                     Timber.i("Device selected = %s", mDeviceAddress);
                     String mDeviceName = data.getStringExtra("NAME");
                     Timber.i("Device selected = %s", mDeviceName);
-                    mBluetoothLeService.setDeviceAddress(mDeviceAddress);
+                    getBluetoothLeService().setDeviceAddress(mDeviceAddress);
                     WheelData.getInstance().full_reset();
                     WheelData.getInstance().setBtName(mDeviceName);
                     updateScreen(true);
                     setMenuIconStates();
-                    mBluetoothLeService.close();
+                    getBluetoothLeService().close();
                     toggleConnectToWheel();
                     if (WheelLog.AppConfig.getAutoUploadEc() && WheelLog.AppConfig.getEcToken() != null) {
                         ElectroClub.getInstance().getAndSelectGarageByMacOrPrimary(

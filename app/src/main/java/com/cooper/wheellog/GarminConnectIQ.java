@@ -18,6 +18,7 @@ import android.widget.Toast;
 import com.cooper.wheellog.utils.Constants;
 import com.cooper.wheellog.utils.KingsongAdapter;
 
+import com.cooper.wheellog.utils.NotificationUtil;
 import com.cooper.wheellog.utils.SomeUtil;
 import com.garmin.android.connectiq.ConnectIQ;
 import com.garmin.android.connectiq.ConnectIQ.ConnectIQListener;
@@ -123,6 +124,7 @@ public class GarminConnectIQ extends Service implements IQApplicationInfoListene
         mMyApp = new IQApp(APP_ID);
         mConnectIQ = ConnectIQ.getInstance(this, IQConnectType.WIRELESS);
         mConnectIQ.initialize(this, true, this);
+        startForeground(Constants.MAIN_NOTIFICATION_ID, NotificationUtil.getNotification());
         return START_STICKY;
     }
 
@@ -142,7 +144,7 @@ public class GarminConnectIQ extends Service implements IQApplicationInfoListene
         }
 
         stopWebServer();
-        stopForeground(true);
+        stopForeground(false);
         instance = null;
     }
 

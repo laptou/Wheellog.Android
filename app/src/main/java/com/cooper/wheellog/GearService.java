@@ -269,7 +269,6 @@ LocationListener locationListener = new LocationListener() {
         catch(Exception exc) {
             Log.e(TAG, "initialization failed");
             exc.printStackTrace();
-            stopForeground(true);
             stopSelf();
         }
 
@@ -291,7 +290,6 @@ LocationListener locationListener = new LocationListener() {
 
     @Override
     public void onDestroy() {
-        stopForeground(true);
     }
 
 }

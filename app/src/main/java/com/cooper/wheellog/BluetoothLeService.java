@@ -29,7 +29,6 @@ import timber.log.Timber;
  */
 public class BluetoothLeService extends Service {
 
-    private BluetoothManager mBluetoothManager;
     private BluetoothAdapter mBluetoothAdapter;
     private String mBluetoothDeviceAddress;
     private BluetoothGatt mBluetoothGatt;
@@ -131,7 +130,7 @@ public class BluetoothLeService extends Service {
             Timber.i("onServicesDiscovered called");
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Timber.i("onServicesDiscovered called, status == BluetoothGatt.GATT_SUCCESS");
-                boolean recognisedWheel = WheelData.getInstance().detectWheel(BluetoothLeService.this, mBluetoothDeviceAddress);
+                boolean recognisedWheel = WheelData.getInstance().detectWheel(mBluetoothDeviceAddress);
                 if (recognisedWheel) {
                     sendBroadcast(new Intent(Constants.ACTION_WHEEL_TYPE_RECOGNIZED));
                     mConnectionState = STATE_CONNECTED;
@@ -261,16 +260,7 @@ public class BluetoothLeService extends Service {
      * @return Return true if the initialization is successful.
      */
     public boolean initialize() {
-        if (mBluetoothManager == null) {
-            mBluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
-            if (mBluetoothManager == null) {
-                Timber.i("Unable to initialize BluetoothManager.");
-                return false;
-            }
-        }
-        if (mBluetoothAdapter == null)
-            mBluetoothAdapter = mBluetoothManager.getAdapter();
-
+        mBluetoothAdapter = getAdapter(getApplicationContext());
         if (mBluetoothAdapter == null) {
             Timber.i("Unable to obtain a BluetoothAdapter.");
             return false;
@@ -550,5 +540,19 @@ public class BluetoothLeService extends Service {
             beepTimer.cancel();
             beepTimer = null;
         }
+    }
+
+    public static BluetoothAdapter getAdapter(Context context) {
+        BluetoothManager bluetoothManager =
+                (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+        if (bluetoothManager == null) {
+            Timber.i("Unable to initialize BluetoothManager.");
+            return null;
+        }
+        BluetoothAdapter bluetoothAdapter = bluetoothManager.getAdapter();
+        if (bluetoothAdapter == null) {
+            Timber.i("Unable to obtain a BluetoothAdapter.");
+        }
+        return bluetoothAdapter;
     }
 }

@@ -23,7 +23,6 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -33,8 +32,6 @@ import java.util.concurrent.TimeUnit;
 import timber.log.Timber;
 
 public class WheelData {
-    private List<IDataListener> listeners = new ArrayList<IDataListener>();
-
     private static final int TIME_BUFFER = 10;
     private static WheelData mInstance;
 	private Timer ridingTimerControl;
@@ -161,6 +158,10 @@ public class WheelData {
         return mBluetoothLeService;
     }
 
+    public void setBluetoothLeService(BluetoothLeService value) {
+        mBluetoothLeService = value;
+    }
+
     void playBeep(ALARM_TYPE type) {
         audioTrack = new AudioTrack(AudioManager.STREAM_MUSIC,
                 sampleRate, AudioFormat.CHANNEL_OUT_MONO,
@@ -182,10 +183,6 @@ public class WheelData {
         //Timber.i("Beep: %d",(type.getValue()-1)*10*sampleRate / 50);
         audioTrack.play();
 
-    }
-
-    public void addListener(IDataListener toAdd) {
-        listeners.add(toAdd);
     }
 
     static void initiate() {
@@ -703,8 +700,6 @@ public class WheelData {
             Context mContext = getBluetoothLeService().getApplicationContext();
             Intent intent = new Intent(Constants.ACTION_WHEEL_TYPE_CHANGED);
             mContext.sendBroadcast(intent);
-            for (IDataListener hl : listeners)
-                hl.changeWheelType();
         }
     }
 
@@ -1315,7 +1310,7 @@ public class WheelData {
             }
         }
         if (mWheelType == WHEEL_TYPE.NINEBOT) NinebotAdapter.stopTimer();
-        mBluetoothLeService = null;
+        setBluetoothLeService(null);
         mWheelType = WHEEL_TYPE.Unknown;
         xAxis.clear();
         speedAxis.clear();
@@ -1376,20 +1371,15 @@ public class WheelData {
 	
     }
 
-    boolean detectWheel(BluetoothLeService bluetoothService, String deviceAddress) {
-        //audioTrack.write(buffer, 20000, buffer.length);
-
-        mBluetoothLeService = bluetoothService;
-        Context mContext = bluetoothService.getApplicationContext();
+    boolean detectWheel(String deviceAddress) {
+        Context mContext = getBluetoothLeService().getApplicationContext();
         WheelLog.AppConfig.setLastMac(deviceAddress);
         String advData = WheelLog.AppConfig.getAdvDataForWheel();
         String adapterName = "";
         protoVer = "";
-        if (advData.compareTo("4e421300000000ec") == 0 || advData.compareTo("4e421302000000ea") == 0) {
+        if (StringUtil.inArray(advData, new String[] {"4e421300000000ec", "4e421302000000ea", })) {
             protoVer = "S2";
-        } else if ((advData.compareTo("4e421400000000eb") == 0) || (advData.compareTo("4e422000000000df") == 0) ||
-                (advData.compareTo("4e422200000000dd") == 0) || (advData.compareTo("4e4230cf") == 0)
-                || advData.startsWith("5600")) {
+        } else if (StringUtil.inArray(advData, new String[] {"4e421400000000eb", "4e422000000000df", "4e422200000000dd", "4e4230cf", "5600"})) {
             protoVer = "Mini";
         }
 

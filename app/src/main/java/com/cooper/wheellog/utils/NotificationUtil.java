@@ -20,6 +20,7 @@ import com.cooper.wheellog.WheelData;
 
 public class NotificationUtil {
     private final Context mContext;
+    private static Notification pNotification;
     private int notificationMessageId = R.string.disconnected;
     private final NotificationCompat.Builder mNotification;
 
@@ -27,6 +28,10 @@ public class NotificationUtil {
         mContext = context;
         createNotificationChannel();
         mNotification = new NotificationCompat.Builder(mContext, Constants.NOTIFICATION_CHANNEL_ID_NOTIFICATION);
+    }
+
+    public static Notification getNotification() {
+        return pNotification;
     }
 
     public void setNotificationMessageId(int value) {
@@ -114,7 +119,7 @@ public class NotificationUtil {
         else
             notificationView.setImageViewResource(R.id.ib_logging, R.drawable.ic_action_logging_grey);
 
-        return mNotification
+        return pNotification = mNotification
                 .setSmallIcon(R.drawable.ic_stat_wheel)
                 .setContentIntent(pendingIntent)
                 .setShowWhen(false)
